@@ -27,11 +27,13 @@ func main() {
 	input()
 	db = openDb()
 
+	println()
 	fmt.Println("Load images data to RAM...")
 	var groups []GroupParts
 	db.Find(&groups)
 	groupsLenDelimiter := len(groups) / threads
 
+	println()
 	fmt.Println("Loading images to disk ")
 	s := spinner.New(spinner.CharSets[43], 100*time.Millisecond)
 	s.Start()
@@ -51,28 +53,37 @@ func main() {
 	s.Stop()
 }
 
-
 // work with images
 func imagesLoad(groups []GroupParts) {
 	for _, group := range groups {
 		rawImages := imageColumnFormat(group)
 		images := strings.Split(rawImages, ",")
 
-		downloadedImages := ""
-
 		for i, img := range images {
 			path := strings.Split(img, "/oem")[1]
-			DownloadFile(directory+path, img)
-			if i > 0 {
-				downloadedImages = downloadedImages + ";" + directory + path
+			err := DownloadFile(directory+path, img)
+			if err != nil {
+				continue
+			}
+
+			if i == 1 {
+				group.DownloadedImage2 = directory + path
 			} else {
-				downloadedImages = downloadedImages + directory + path
+				group.DownloadedImage = directory + path
 			}
 		}
 
-		println(downloadedImages)
+		if group.DownloadedImage == "" {
+			continue
+		}
+
+
 		// update db
-		db.Model(&GroupParts{}).Where("id = ?", group.ID).Update("downloaded_image", downloadedImages)
+		db.Model(&GroupParts{}).Where("id = ?", group.ID).Update("downloaded_image", group.DownloadedImage)
+
+		if group.DownloadedImage2 != "" {
+			db.Model(&GroupParts{}).Where("id = ?", group.ID).Update("downloaded_image2", group.DownloadedImage2)
+		}
 	}
 
 	fmt.Println("Thread downloaded all images")
@@ -91,6 +102,9 @@ func DownloadFile(filepath string, url string) error {
 	// Get the data
 	resp, err := http.Get(url)
 	if err != nil {
+		return err
+	}
+	if resp.StatusCode != 200 {
 		return err
 	}
 	defer resp.Body.Close()
@@ -152,20 +166,17 @@ func input() {
 		dbPass = "1"
 	}
 
-
 	fmt.Println("db server (default: localhost): ")
 	fmt.Scanln(&dbServer)
 	if dbServer == "" {
 		dbServer = "localhost"
 	}
 
-
 	fmt.Println("directory for images (default: images): ")
 	fmt.Scanln(&directory)
 	if directory == "" {
 		directory = "images"
 	}
-
 
 	fmt.Println("threads (default: 2): ")
 	fmt.Scanln(&threads)
@@ -179,7 +190,8 @@ func input() {
 type GroupParts struct {
 	ID              uint   `gorm:"primarykey" json:"id"`
 	Image           JSON   `sql:"type:json" json:"image"`
-	DownloadedImage string `sql:"type:json" gorm:"downloaded_image"`
+	DownloadedImage string `gorm:"downloaded_image"`
+	DownloadedImage2 string `gorm:"downloaded_image2"`
 }
 
 // Mysql JSON support
